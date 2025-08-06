@@ -9,9 +9,9 @@ export default function SearchForm() {
   const [destination, setDestination] = useState('');
   const navigate = useNavigate();
 
-  const handleSearch = async () => { 
+  const handleSearch = async () => {
     if (!source || !destination) {
-      alert("Please enter Source and Destination");
+      alert("Yo, you gotta fill both Source and Destination. Don't make me guess.");
       return;
     }
 
@@ -21,29 +21,40 @@ export default function SearchForm() {
         destination: destination.trim(),
         timestamp: serverTimestamp(),
       });
-      console.log("Search logged successfully.");
+      // Seriously, this should work. Unless the internet's dead.
+      console.log("Search logged successfully. Nice.");
     } catch (err) {
-      console.log("Error logging search:", err);
+      console.log("Ugh. Couldn't log your search:", err);
     }
 
-    navigate(`/station-details?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}`);
+    navigate(
+      `/station-details?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(
+        destination
+      )}`
+    );
   };
 
   return (
-    <div className={styles.form}>
+    <div className={styles.formContainer}>
       <input
         type="text"
         placeholder="Enter Source"
         value={source}
         onChange={(e) => setSource(e.target.value)}
+        className={styles.input}
+        autoComplete="off"
       />
       <input
         type="text"
         placeholder="Enter Destination"
         value={destination}
         onChange={(e) => setDestination(e.target.value)}
+        className={styles.input}
+        autoComplete="off"
       />
-      <button onClick={handleSearch}>Search 🔎</button>
+      <button className={styles.searchBtn} onClick={handleSearch}>
+        Search 🔎
+      </button>
     </div>
   );
 }

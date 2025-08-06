@@ -10,9 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/leaflet": "^1.9.19",
     "firebase": "^11.10.0",
+    "leaflet": "^1.9.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.6.2"
   },
   "devDependencies": {
@@ -25,5 +28,10 @@
     "eslint-plugin-react-refresh": "^0.4.19",
     "globals": "^16.0.0",
     "vite": "^6.3.5"
-  }
+  },
+  "description": "A dynamic website that helps users find EV Charging Stations between their source and destination.",
+  "main": "eslint.config.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }
