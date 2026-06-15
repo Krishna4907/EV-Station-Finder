@@ -20,9 +20,11 @@ export default function Home() {
   };
 
   const handleSearch = () => {
-    if (!source.trim() || !destination.trim()) return;
-    navigate(`/station-details?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}`);
-  };
+  if (!source.trim() || !destination.trim()) return;
+  navigate(`/map?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}`);
+};
+
+
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>

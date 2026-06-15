@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import MapView from './pages/MapView'
 import StationDetails from './pages/StationDetails';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
@@ -19,6 +20,7 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/station-details" element={<StationDetails />} />
+          <Route path="/map" element={<PrivateRoute><MapView /></PrivateRoute>} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
