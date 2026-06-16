@@ -37,6 +37,19 @@ export default function MapView() {
     return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
   };
 
+  // ── Haversine distance between two lat/lng points in km
+  const haversineKm = (lat1, lng1, lat2, lng2) => {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  };
+
   // ── Load saved car (needed to run trip planner)
   useEffect(() => {
     if (!user) return;
@@ -55,7 +68,7 @@ export default function MapView() {
     loadCar();
   }, [user]);
 
-  // ── Fetch stations from OpenChargeMap around route midpoint
+  // ── Fetch stations along the entire route (multi-point sampling)
   const fetchStations = useCallback(async () => {
     if (!source || !destination) return;
     try {
@@ -66,18 +79,56 @@ export default function MapView() {
       setSourceCoords(src);
       setDestCoords(dst);
 
-      const midLat = (src.lat + dst.lat) / 2;
-      const midLng = (src.lng + dst.lng) / 2;
+      // Sample multiple points along the route instead of just the midpoint.
+      // Long routes (Delhi → Ranchi = ~1000km) need stations spread across
+      // the whole path, not clustered in one 50km circle in the middle.
+      const totalDistanceKm = haversineKm(src.lat, src.lng, dst.lat, dst.lng);
 
-      const res  = await fetch(
-        `https://api.openchargemap.io/v3/poi/?latitude=${midLat}&longitude=${midLng}&distance=50&key=3e3b739e-9a3e-4b18-bf1a-0e9f1d5418bb`
+      const numSamples = totalDistanceKm > 600 ? 7
+                        : totalDistanceKm > 300 ? 5
+                        : 3;
+      const searchRadiusKm = totalDistanceKm > 600 ? 60
+                            : totalDistanceKm > 300 ? 50
+                            : 40;
+
+      const samplePoints = [];
+      for (let i = 0; i < numSamples; i++) {
+        const fraction = i / (numSamples - 1); // 0 → 1 spread evenly source→dest
+        samplePoints.push({
+          lat: src.lat + (dst.lat - src.lat) * fraction,
+          lng: src.lng + (dst.lng - src.lng) * fraction,
+        });
+      }
+
+      // Fetch stations around every sample point in parallel
+      const results = await Promise.all(
+        samplePoints.map((p) =>
+          fetch(
+            `https://api.openchargemap.io/v3/poi/?latitude=${p.lat}&longitude=${p.lng}&distance=${searchRadiusKm}&maxresults=100&key=3e3b739e-9a3e-4b18-bf1a-0e9f1d5418bb`
+          )
+            .then((res) => (res.ok ? res.json() : []))
+            .catch(() => [])
+        )
       );
-      if (!res.ok) throw new Error('Failed to fetch stations');
-      const data = await res.json();
 
-      setStations(data.filter(
-        (s) => s.AddressInfo?.Latitude && s.AddressInfo?.Longitude
-      ));
+      // Merge + deduplicate by station ID
+      const merged = new Map();
+      results.flat().forEach((station) => {
+        if (station.AddressInfo?.Latitude && station.AddressInfo?.Longitude) {
+          merged.set(station.ID, station);
+        }
+      });
+
+      const allStations = Array.from(merged.values());
+
+      if (allStations.length === 0) {
+        setError(
+          `No charging stations found within ${searchRadiusKm}km of this route. ` +
+          `Try a route closer to major highways, or check back later as new stations are added regularly.`
+        );
+      }
+
+      setStations(allStations);
     } catch (err) {
       setError(err.message);
     } finally {
