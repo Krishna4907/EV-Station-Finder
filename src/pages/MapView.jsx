@@ -1,14 +1,20 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../Firebase/config';
+import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 import MapPanel from '../components/MapPanel';
+import { planTrip } from '../utils/tripPlanner';
 
 export default function MapView() {
   const location    = useLocation();
   const navigate    = useNavigate();
+  const { user }    = useAuth();
   const params      = new URLSearchParams(location.search);
   const source      = params.get('source')      || '';
   const destination = params.get('destination') || '';
+  const batteryParam = params.get('battery');
 
   const [stations,          setStations]          = useState([]);
   const [loading,           setLoading]           = useState(true);
@@ -17,6 +23,9 @@ export default function MapView() {
   const [destCoords,        setDestCoords]        = useState(null);
   const [selectedStationId, setSelectedStationId] = useState(null);
   const [backHovered,       setBackHovered]       = useState(false);
+
+  const [savedCar, setSavedCar]   = useState(null);
+  const [tripPlan, setTripPlan]   = useState(null);
 
   // ── Geocode a place name → { lat, lng }
   const geocode = async (place) => {
@@ -27,6 +36,24 @@ export default function MapView() {
     if (!data.length) throw new Error(`Could not find: ${place}`);
     return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
   };
+
+  // ── Load saved car (needed to run trip planner)
+  useEffect(() => {
+    if (!user) return;
+    const loadCar = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        if (snap.exists() && snap.data().carId) {
+          const { EV_CARS } = await import('../data/evCars');
+          const car = EV_CARS.find(c => c.id === snap.data().carId);
+          if (car) setSavedCar(car);
+        }
+      } catch (err) {
+        // no car saved — trip planner simply won't run
+      }
+    };
+    loadCar();
+  }, [user]);
 
   // ── Fetch stations from OpenChargeMap around route midpoint
   const fetchStations = useCallback(async () => {
@@ -48,7 +75,6 @@ export default function MapView() {
       if (!res.ok) throw new Error('Failed to fetch stations');
       const data = await res.json();
 
-      // Only keep stations that have valid coordinates
       setStations(data.filter(
         (s) => s.AddressInfo?.Latitude && s.AddressInfo?.Longitude
       ));
@@ -60,6 +86,25 @@ export default function MapView() {
   }, [source, destination]);
 
   useEffect(() => { fetchStations(); }, [fetchStations]);
+
+  // ── Run trip planner once we have stations, coords, car, and battery %
+  useEffect(() => {
+    if (!sourceCoords || !destCoords || stations.length === 0) return;
+    if (!savedCar || !batteryParam) {
+      setTripPlan(null);
+      return;
+    }
+    const battery = Number(batteryParam);
+    if (isNaN(battery)) return;
+
+    const plan = planTrip(sourceCoords, destCoords, stations, savedCar, battery);
+    setTripPlan(plan);
+  }, [sourceCoords, destCoords, stations, savedCar, batteryParam]);
+
+  // Set of station IDs that are suggested stops, for quick lookup
+  const suggestedStopIds = new Set(
+    (tripPlan?.suggestedStops || []).map((s) => s.station.ID)
+  );
 
   // Scroll the selected card into view
   useEffect(() => {
@@ -100,9 +145,44 @@ export default function MapView() {
     );
   };
 
+  // ── Trip summary banner (shown when plan exists)
+  const TripSummaryBanner = () => {
+    if (!tripPlan) return null;
+
+    return (
+      <div style={{
+        padding: '14px 18px',
+        borderBottom: '1px solid #e5e5e5',
+        background: tripPlan.needsStops ? 'rgba(0,200,150,0.04)' : 'rgba(34,197,94,0.04)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke={tripPlan.needsStops ? '#00a87e' : '#22c55e'}
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            style={{ flexShrink: 0, marginTop: '1px' }}>
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: '600', color: '#111111', marginBottom: '2px' }}>
+              {tripPlan.needsStops
+                ? `${tripPlan.suggestedStops.length} charging stop${tripPlan.suggestedStops.length !== 1 ? 's' : ''} suggested`
+                : 'No charging stops needed'}
+            </div>
+            <div style={{ fontSize: '11px', color: '#666666', lineHeight: 1.5 }}>
+              {tripPlan.message}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // ── Station card
   const StationCard = ({ station }) => {
     const isSelected = station.ID === selectedStationId;
+    const isSuggested = suggestedStopIds.has(station.ID);
+    const stopInfo = tripPlan?.suggestedStops.find(s => s.station.ID === station.ID);
+
     return (
       <div
         id={`station-card-${station.ID}`}
@@ -111,12 +191,33 @@ export default function MapView() {
           padding: '16px 18px',
           borderBottom: '1px solid #f0f0ee',
           cursor: 'pointer',
-          background: isSelected ? 'rgba(0,200,150,0.04)' : '#ffffff',
-          borderLeft: isSelected ? '2.5px solid #00C896' : '2.5px solid transparent',
+          background: isSelected ? 'rgba(0,200,150,0.04)' : isSuggested ? 'rgba(0,200,150,0.015)' : '#ffffff',
+          borderLeft: isSelected ? '2.5px solid #00C896' : isSuggested ? '2.5px solid rgba(0,200,150,0.4)' : '2.5px solid transparent',
           transition: 'all 0.15s ease',
           position: 'relative',
         }}
       >
+        {/* Suggested stop badge */}
+        {isSuggested && (
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            background: '#111111',
+            color: '#ffffff',
+            fontSize: '10px',
+            fontWeight: '600',
+            padding: '3px 8px',
+            borderRadius: '6px',
+            marginBottom: '8px',
+          }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+            Suggested Stop · Arrive ~{stopInfo?.arrivalPercent}%
+          </div>
+        )}
+
         {/* Station name */}
         <div style={{
           fontSize: '13px',
@@ -196,6 +297,15 @@ export default function MapView() {
       </div>
     );
   };
+
+  // Sort: suggested stops first, then everything else
+  const sortedStations = [...stations].sort((a, b) => {
+    const aIsSuggested = suggestedStopIds.has(a.ID);
+    const bIsSuggested = suggestedStopIds.has(b.ID);
+    if (aIsSuggested && !bIsSuggested) return -1;
+    if (!aIsSuggested && bIsSuggested) return 1;
+    return 0;
+  });
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -286,8 +396,12 @@ export default function MapView() {
             {/* Station count */}
             <div style={{ fontSize: '11.5px', color: '#888888', marginTop: '6px' }}>
               {loading ? 'Finding stations…' : error ? 'Error loading stations' : `${stations.length} stations found`}
+              {tripPlan && !loading && ` · ${tripPlan.totalDistanceKm} km trip`}
             </div>
           </div>
+
+          {/* Trip summary banner */}
+          {!loading && <TripSummaryBanner />}
 
           {/* Station list */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -337,8 +451,8 @@ export default function MapView() {
               </div>
             )}
 
-            {/* Cards */}
-            {!loading && !error && stations.map((station) => (
+            {/* Cards — suggested stops sorted first */}
+            {!loading && !error && sortedStations.map((station) => (
               <StationCard key={station.ID} station={station} />
             ))}
           </div>
@@ -351,6 +465,7 @@ export default function MapView() {
             destCoords={destCoords}
             stations={stations}
             selectedStationId={selectedStationId}
+            suggestedStopIds={suggestedStopIds}
             onStationClick={handleStationClick}
           />
 

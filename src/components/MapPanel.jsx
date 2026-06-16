@@ -10,7 +10,6 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-// Custom pin SVG icons
 const createSourceIcon = () => L.divIcon({
   className: '',
   html: `
@@ -39,37 +38,69 @@ const createDestIcon = () => L.divIcon({
   iconAnchor: [7, 7],
 });
 
-const createStationIcon = (isSelected) => L.divIcon({
-  className: '',
-  html: `
-    <div style="
-      width:${isSelected ? 32 : 26}px;
-      height:${isSelected ? 32 : 26}px;
-      background:${isSelected ? '#111111' : '#ffffff'};
-      border-radius:50%;
-      border:2px solid ${isSelected ? '#111111' : '#e5e5e5'};
-      box-shadow:${isSelected
-        ? '0 0 0 3px rgba(0,200,150,0.2), 0 4px 12px rgba(0,0,0,0.2)'
-        : '0 2px 6px rgba(0,0,0,0.12)'};
-      display:flex; align-items:center; justify-content:center;
-      transition:all 0.2s;
-    ">
-      <svg width="${isSelected ? 14 : 12}" height="${isSelected ? 14 : 12}"
-        viewBox="0 0 24 24" fill="none"
-        stroke="${isSelected ? '#00C896' : '#888888'}"
-        stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-      </svg>
-    </div>`,
-  iconSize: [isSelected ? 32 : 26, isSelected ? 32 : 26],
-  iconAnchor: [isSelected ? 16 : 13, isSelected ? 16 : 13],
-});
+// isSelected → black filled pin (active focus)
+// isSuggested → larger pin with dark ring + bolt, always visible as a "stop"
+// default → small white pin
+const createStationIcon = (isSelected, isSuggested) => {
+  let size, bg, border, boxShadow, strokeColor, iconSize;
+
+  if (isSelected) {
+    size = 32; bg = '#111111'; border = '#111111';
+    boxShadow = '0 0 0 3px rgba(0,200,150,0.2), 0 4px 12px rgba(0,0,0,0.2)';
+    strokeColor = '#00C896'; iconSize = 14;
+  } else if (isSuggested) {
+    size = 30; bg = '#ffffff'; border = '#111111';
+    boxShadow = '0 0 0 2px rgba(0,200,150,0.25), 0 3px 10px rgba(0,0,0,0.15)';
+    strokeColor = '#111111'; iconSize = 13;
+  } else {
+    size = 24; bg = '#ffffff'; border = '#e5e5e5';
+    boxShadow = '0 2px 6px rgba(0,0,0,0.12)';
+    strokeColor = '#aaaaaa'; iconSize = 11;
+  }
+
+  return L.divIcon({
+    className: '',
+    html: `
+      <div style="
+        width:${size}px; height:${size}px;
+        background:${bg};
+        border-radius:50%;
+        border:2px solid ${border};
+        box-shadow:${boxShadow};
+        display:flex; align-items:center; justify-content:center;
+        transition:all 0.2s;
+        position:relative;
+      ">
+        <svg width="${iconSize}" height="${iconSize}"
+          viewBox="0 0 24 24" fill="none"
+          stroke="${strokeColor}"
+          stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        ${isSuggested && !isSelected ? `
+          <div style="
+            position:absolute; top:-4px; right:-4px;
+            width:14px; height:14px;
+            background:#111111;
+            border-radius:50%;
+            border:1.5px solid #ffffff;
+            display:flex; align-items:center; justify-content:center;
+            font-size:8px; color:#ffffff; font-weight:700;
+            font-family:-apple-system,sans-serif;
+          ">✓</div>
+        ` : ''}
+      </div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+};
 
 export default function MapPanel({
   sourceCoords,
   destCoords,
   stations,
   selectedStationId,
+  suggestedStopIds = new Set(),
   onStationClick,
 }) {
   const mapRef       = useRef(null);
@@ -92,7 +123,6 @@ export default function MapPanel({
       maxZoom: 19,
     }).addTo(mapInstance.current);
 
-    // Custom zoom control — bottom right
     L.control.zoom({ position: 'bottomright' }).addTo(mapInstance.current);
 
     return () => {
@@ -106,12 +136,10 @@ export default function MapPanel({
     const map = mapInstance.current;
     if (!map || !sourceCoords || !destCoords) return;
 
-    // Remove old route
     if (routeLineRef.current) {
       map.removeLayer(routeLineRef.current);
     }
 
-    // Draw straight route line (upgrade to OSRM later for real roads)
     const latlngs = [
       [sourceCoords.lat, sourceCoords.lng],
       [destCoords.lat, destCoords.lng],
@@ -124,27 +152,20 @@ export default function MapPanel({
       dashArray: '6 4',
     }).addTo(map);
 
-    // Source marker
     L.marker([sourceCoords.lat, sourceCoords.lng], { icon: createSourceIcon() })
       .addTo(map)
       .bindTooltip('Start', {
-        permanent: false,
-        direction: 'top',
-        className: 'map-tooltip',
-        offset: [0, -10],
+        permanent: false, direction: 'top',
+        className: 'map-tooltip', offset: [0, -10],
       });
 
-    // Destination marker
     L.marker([destCoords.lat, destCoords.lng], { icon: createDestIcon() })
       .addTo(map)
       .bindTooltip('Destination', {
-        permanent: false,
-        direction: 'top',
-        className: 'map-tooltip',
-        offset: [0, -10],
+        permanent: false, direction: 'top',
+        className: 'map-tooltip', offset: [0, -10],
       });
 
-    // Fit map to show full route
     map.fitBounds(
       L.latLngBounds(latlngs).pad(0.25),
       { animate: true, duration: 0.8 }
@@ -156,7 +177,6 @@ export default function MapPanel({
     const map = mapInstance.current;
     if (!map) return;
 
-    // Remove old station markers
     Object.values(markersRef.current).forEach((m) => map.removeLayer(m));
     markersRef.current = {};
 
@@ -165,26 +185,27 @@ export default function MapPanel({
       const lng = station.AddressInfo?.Longitude;
       if (!lat || !lng) return;
 
-      const isSelected = station.ID === selectedStationId;
+      const isSelected  = station.ID === selectedStationId;
+      const isSuggested = suggestedStopIds.has(station.ID);
+
       const marker = L.marker([lat, lng], {
-        icon: createStationIcon(isSelected),
-        zIndexOffset: isSelected ? 1000 : 0,
+        icon: createStationIcon(isSelected, isSuggested),
+        zIndexOffset: isSelected ? 1000 : isSuggested ? 500 : 0,
       }).addTo(map);
 
-      marker.bindTooltip(
-        station.AddressInfo?.Title || 'Station',
-        {
-          permanent: false,
-          direction: 'top',
-          className: 'map-tooltip',
-          offset: [0, -14],
-        }
-      );
+      const tooltipText = isSuggested
+        ? `⚡ ${station.AddressInfo?.Title || 'Station'} (suggested stop)`
+        : station.AddressInfo?.Title || 'Station';
+
+      marker.bindTooltip(tooltipText, {
+        permanent: false, direction: 'top',
+        className: 'map-tooltip', offset: [0, -16],
+      });
 
       marker.on('click', () => onStationClick(station.ID));
       markersRef.current[station.ID] = marker;
     });
-  }, [stations, selectedStationId, onStationClick]);
+  }, [stations, selectedStationId, suggestedStopIds, onStationClick]);
 
   // Pan to selected station
   useEffect(() => {
