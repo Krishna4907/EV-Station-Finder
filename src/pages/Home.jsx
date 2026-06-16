@@ -1,6 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../Firebase/config';
+import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
+import CarProfileModal from '../components/CarProfileModal';
 
 export default function Home() {
   const [source, setSource] = useState('');
@@ -11,7 +15,10 @@ export default function Home() {
   const [btnHovered, setBtnHovered] = useState(false);
   const [carBtnHovered, setCarBtnHovered] = useState(false);
   const [hoveredFeature, setHoveredFeature] = useState(null);
-  
+  const { user } = useAuth();
+  const [carModalOpen, setCarModalOpen] = useState(false);
+  const [savedCar, setSavedCar]         = useState(null);
+  const [batteryPercent, setBatteryPercent] = useState(80);
   const navigate = useNavigate();
 
   const handleSwap = () => {
@@ -20,16 +27,32 @@ export default function Home() {
   };
 
   const handleSearch = () => {
-  if (!source.trim() || !destination.trim()) return;
-  navigate(`/map?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}`);
-};
+    if (!source.trim() || !destination.trim()) return;
+    const batteryParam = savedCar ? `&battery=${batteryPercent}` : '';
+    navigate(`/map?source=${encodeURIComponent(source)}&destination=${encodeURIComponent(destination)}${batteryParam}`);
+  };
 
-
+  // Load saved car from Firestore on mount
+  useEffect(() => {
+    if (!user) return;
+    const loadCar = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        if (snap.exists() && snap.data().carId) {
+          const { EV_CARS } = await import('../data/evCars');
+          const car = EV_CARS.find(c => c.id === snap.data().carId);
+          if (car) setSavedCar(car);
+        }
+      } catch (err) {
+        // no car saved yet — ignore silently
+      }
+    };
+    loadCar();
+  }, [user]);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <Navbar />
-
       {/* Subtle Warm Background Blur */}
       <div
         style={{
@@ -46,7 +69,6 @@ export default function Home() {
           pointerEvents: 'none',
         }}
       />
-
       <main
         style={{
           flex: 1,
@@ -73,7 +95,6 @@ export default function Home() {
         >
           ⚡ Trip Planner
         </div>
-
         <h1
           className="font-display"
           style={{
@@ -88,7 +109,6 @@ export default function Home() {
         >
           Where are you driving today?
         </h1>
-
         <p
           style={{
             fontSize: '13.5px',
@@ -100,7 +120,6 @@ export default function Home() {
         >
           Find optimized charging stations along your route based on live availability and distance.
         </p>
-
         {/* Plan Form Card */}
         <div
           className="glass-panel"
@@ -114,7 +133,6 @@ export default function Home() {
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', position: 'relative' }}>
-            
             {/* Source Input */}
             <div
               style={{
@@ -158,7 +176,6 @@ export default function Home() {
                 }}
               />
             </div>
-
             {/* Swap Button (between source and destination) */}
             <div style={{ position: 'relative', height: '1px', zIndex: 10 }}>
               <button
@@ -188,7 +205,6 @@ export default function Home() {
                 </svg>
               </button>
             </div>
-
             {/* Destination Input */}
             <div
               style={{
@@ -234,8 +250,50 @@ export default function Home() {
             </div>
           </div>
 
-          <div style={{ height: '20px' }} />
+          {savedCar && (
+            <>
+              <div style={{ height: '16px' }} />
+              <div
+                style={{
+                  background: 'rgba(0, 180, 136, 0.01)',
+                  border: '1px solid rgba(0, 0, 0, 0.06)',
+                  borderRadius: '10px',
+                  padding: '14px 16px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <span style={{ fontSize: '11.5px', color: 'var(--ink2)', fontWeight: '500' }}>
+                    Current battery
+                  </span>
+                  <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--teal)', letterSpacing: '-0.3px' }}>
+                    {batteryPercent}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="5"
+                  max="100"
+                  step="5"
+                  value={batteryPercent}
+                  onChange={(e) => setBatteryPercent(Number(e.target.value))}
+                  style={{
+                    width: '100%',
+                    height: '5px',
+                    borderRadius: '99px',
+                    background: `linear-gradient(to right, var(--teal) ${batteryPercent}%, #e5e5e5 ${batteryPercent}%)`,
+                    outline: 'none',
+                    accentColor: 'var(--teal)',
+                    cursor: 'pointer',
+                  }}
+                />
+                <div style={{ fontSize: '10.5px', color: 'var(--ink3)', marginTop: '6px' }}>
+                  ~{Math.round((batteryPercent / 100) * savedCar.range_km)} km of range available
+                </div>
+              </div>
+            </>
+          )}
 
+          <div style={{ height: '20px' }} />
           {/* Car Info Bar */}
           <div
             style={{
@@ -250,16 +308,17 @@ export default function Home() {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ink3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={savedCar ? 'var(--teal)' : 'var(--ink3)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="7" width="20" height="10" rx="2" ry="2"></rect>
                 <circle cx="6" cy="17" r="2"></circle>
                 <circle cx="18" cy="17" r="2"></circle>
               </svg>
-              <span style={{ fontSize: '11.5px', color: 'var(--ink3)' }}>
-                Smart estimates based on your EV model
+              <span style={{ fontSize: '11.5px', color: savedCar ? 'var(--ink)' : 'var(--ink3)', fontWeight: savedCar ? '500' : '400' }}>
+                {savedCar ? `${savedCar.name} · ${savedCar.range_km} km range` : 'Smart estimates based on your EV model'}
               </span>
             </div>
             <button
+              onClick={() => setCarModalOpen(true)}
               onMouseEnter={() => setCarBtnHovered(true)}
               onMouseLeave={() => setCarBtnHovered(false)}
               style={{
@@ -274,12 +333,10 @@ export default function Home() {
                 transition: 'color 0.2s ease',
               }}
             >
-              Add car <span>→</span>
+              {savedCar ? 'Change' : 'Add car'} <span>→</span>
             </button>
           </div>
-
           <div style={{ height: '20px' }} />
-
           {/* Search Button */}
           <button
             onClick={handleSearch}
@@ -301,7 +358,6 @@ export default function Home() {
             Find charging stops
           </button>
         </div>
-
         {/* Benefits Grid */}
         <div
           style={{
@@ -392,6 +448,12 @@ export default function Home() {
           ))}
         </div>
       </main>
+      {carModalOpen && (
+        <CarProfileModal
+          onClose={() => setCarModalOpen(false)}
+          onSaved={(car) => setSavedCar(car)}
+        />
+      )}
     </div>
   );
 }
