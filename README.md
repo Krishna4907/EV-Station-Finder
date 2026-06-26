@@ -240,11 +240,7 @@ src/
 
 ---
 
-## 📸 Screenshots
 
-> Coming soon — deploy your own instance and add screenshots here!
-
----
 
 ## 🤝 Contributing
 
